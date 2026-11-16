@@ -15,7 +15,7 @@ This repository hosts official, pre-compiled binary distributions, container spe
 
 Chronolox Relayer is the backend relay and transaction submission daemon: gasless transaction relaying, prepaid voucher redemption, autonomous journal records, and on-chain timestamp notary services.
 
-Pre-built binaries and appliance ISO distributions are available on the [Releases](https://github.com/Chronolox/relayer/releases) page.
+Pre-built binaries and appliance ISO distributions are available on the [Releases](https://github.com/Chronolox/relayer/releases) page. For a guided installer with automatic platform detection, see the [Downloads & Installation](https://chronolox.com/downloads) page.
 
 ---
 
