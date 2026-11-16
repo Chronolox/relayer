@@ -98,6 +98,11 @@ Official releases also publish hardened bootable ISO images for bare-metal serve
 
 For complete technical specifications on relayer node operations and protocol mechanics, consult the [Chronolox Architecture & Security Model](https://github.com/Chronolox/specs).
 
+### Documentation
+
+- **[Chronolox Relayer OS Setup Manual (PDF)](./docs/Chronolox-Relayer-OS-Setup-Manual.pdf)** — printable step-by-step guide for installing the bootable appliance ISO: download and signature verification, mounting the ISO on your VPS provider, the first-boot wizard, and post-reboot vault unlock. The same document is served at [chronolox.com/docs/Chronolox-Relayer-OS-Setup-Manual.pdf](https://chronolox.com/docs/Chronolox-Relayer-OS-Setup-Manual.pdf).
+- **[Operator setup guide](https://chronolox.com/relayer-setup)** — the canonical web walkthrough for configuring a running relayer (wallet funding, HTTPS, authorization, staking).
+
 ---
 
 ## Security & Bug Reporting
