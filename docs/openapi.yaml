@@ -84,22 +84,44 @@ info:
     \ per-client limits when a valid `BearerAuth` token is supplied are\nreserved\
     \ for future enforcement (`Authorization` headers are currently accepted and\n\
     ignored). Currently enforced server limits:\n\n- **Baseline public API limit**\
-    \ (all other `/api/*` endpoints except `GET /api/health`,\n  which has no rate-limiting\
-    \ middleware): **1,200 requests/hour per client IP**.\n- **Shared rate-limited\
-    \ endpoints** (`/api/voucher/redeem`, `/api/voucher/check`,\n  `/api/notary/timestamp`,\
-    \ `/api/wallet/{wallet}/pubkey`, `/api/reprocess/gateway`,\n  `/api/vouchers/discover`,\
-    \ `/api/update/binary`, and `/api/abuse/report`): **50\n  requests/hour per client\
-    \ IP**.\n- **Secret access** (`/api/secrets/access`): **50 requests/hour** on\
-    \ the paid/gas\n  path and **1,000 requests/hour** on the cached/already-viewed\
-    \ path, keyed per\n  `secretId` and per client IP.\n- **Voucher secret writes**\
-    \ (`/api/voucher/secret/create`, `/update`, `/cancel`):\n  **100 requests/hour\
-    \ per `userWallet`** and **300 requests/hour per client IP**;\n  **128 KiB** request\
-    \ body cap (`413`).\n- **Journal writes** (`/api/journal/entry`): **50 requests/hour\
-    \ per `secret_id`** and\n  **120 requests/hour per client IP**; **128 KiB** request\
+    \ (generated public `/api/*` endpoints plus\n  `/api/bootstrap/snapshot-info`\
+    \ and `/api/logs/ws`, excluding `GET /api/health`\n  which is unthrottled, and\
+    \ excluding routes with dedicated limiters below):\n  **1,200 requests/hour per\
+    \ client IP**. Peer-to-peer routes (`/api/records`,\n  `/api/records/sync`, `/api/records/iblt-sync`,\
+    \ `/api/vouchers/sync`,\n  `/api/notary/timestamps/sync`, `/api/dead-letter/notify`,\n\
+    \  `/api/bootstrap/snapshot`) share the same bucket with a **10x ceiling\n  (12,000\
+    \ requests/hour)** so a relayer fleet behind one egress IP is never\n  mistaken\
+    \ for abuse. Non-OpenAPI documentation/utility routes\n  (`/api/sign-auth-request`,\
+    \ `/api/docs*`, `/api/explorer*`, `/api/openapi*.yaml`)\n  and `webAuthMiddleware`-protected\
+    \ `/api/database/*` routes do not pass through\n  this baseline limiter.\n- **Shared\
+    \ rate-limited endpoints** (`/api/voucher/redeem`, `/api/voucher/check`,\n  `/api/notary/timestamp`,\
+    \ `/api/wallet/{wallet}/pubkey`, `/api/reprocess/gateway`,\n  `/api/gateway/reprocess`,\
+    \ `/api/vouchers/discover`, `/api/update/binary`, and\n  `/api/abuse/report`):\
+    \ **50 requests/hour per client IP**.\n- **Secret access** (`/api/secrets/access`):\
+    \ **50 requests/hour** on the paid/gas\n  path and **1,000 requests/hour** on\
+    \ the cached/already-viewed path, keyed per\n  `secretId` and per client IP. The\
+    \ per-`secretId` bucket always enforces; the\n  per-IP buckets ship in observe-only\
+    \ mode (see below) and are skipped entirely\n  when the client IP resolves to\
+    \ a local reverse proxy.\n- **Voucher secret writes** (`/api/voucher/secret/create`,\
+    \ `/update`, `/cancel`):\n  **100 requests/hour per `userWallet`** and **300 requests/hour\
+    \ per client IP**;\n  **128 KiB** (`131,072` bytes) request body cap (`413`).\n\
+    - **Journal writes** (`/api/journal/entry`): **50 requests/hour per `secret_id`**\
+    \ and\n  **120 requests/hour per client IP**; **128 KiB** (`131,072` bytes) request\
     \ body cap (`413`).\n- **Global request body cap**: **4 MiB** across API routes.\n\
     \nExceeding a rate limit returns HTTP `429` (`code: RATE_LIMITED`) with a `Retry-After`\n\
-    response header (remaining seconds in the current window). Clients should honor\n\
-    `Retry-After` or back off exponentially when retrying `429` responses.\n"
+    response header (integer seconds remaining in the current window, minimum `1`).\
+    \ Clients should honor\n`Retry-After` or back off exponentially when retrying\
+    \ `429` responses.\n\nThe public baseline limiter ships in **observe-only mode**:\
+    \ over-threshold requests are\ncounted and logged but still served, so the operator\
+    \ can size the ceiling from real\ntraffic before enforcing. Set `relayer.baseline_limiter_mode`\
+    \ (env\n`RELAYER_BASELINE_LIMITER_MODE`) to `enforce` to activate `429` responses\
+    \ on that\nbucket; the current mode and would-block counters are exported by `GET\
+    \ /api/metrics`\n(`relayer_limiter_mode`, `relayer_limiter_would_block_total`).\
+    \ Any value other than\n`enforce` behaves as `log`. The admin API baseline limiter\
+    \ follows the same pattern\nvia `relayer.admin_general_limiter_mode` (`RELAYER_ADMIN_GENERAL_LIMITER_MODE`),\
+    \ as\ndoes the secret-access per-IP bucket via `relayer.access_secret_ip_bucket_mode`\n\
+    (`RELAYER_ACCESS_SECRET_IP_BUCKET_MODE`); the per-`secretId` access bucket is\n\
+    unaffected by the mode and always enforces.\n"
   version: 1.0.2
   contact:
     name: Frontware International
@@ -2497,7 +2519,7 @@ paths:
                 publicKey: '0xB7C0a4Ae447FcEfF8B686dE6d7CcC6FdD9eb946b'
                 version: 1.0.0
                 data:
-                  doc_hash: '0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
+                  doc_hash: '0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
                   author: '0x1234567890123456789012345678901234567890'
                   chain: polygonAmoy
                   author_name: Alice
@@ -2590,7 +2612,7 @@ paths:
                 version: 1.0.0
                 data:
                   records:
-                  - doc_hash: '0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
+                  - doc_hash: '0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
                     author: '0x1234567890123456789012345678901234567890'
                     chain: polygonAmoy
                     author_name: Alice
@@ -3203,19 +3225,24 @@ components:
       in: header
       name: X-Relayer-Signature
       description: "ECDSA signature authentication for relayer-to-relayer requests.\n\
-        Requires three headers:\n- `X-Relayer-Wallet`: The relayer's wallet address\
-        \ (signer)\n- `X-Relayer-Timestamp`: Unix timestamp (must be within 2 minutes)\n\
-        - `X-Relayer-Signature`: ECDSA signature of `keccak256(timestamp|wallet)`\n\
-        Operator endpoints (income, restart, sync management, notary reconcile) also\n\
-        accept these headers as one authentication path; the operator dashboard\n\
-        alternatively authenticates via its web session cookie, which is not\nexpressible\
-        \ as an OpenAPI scheme.\n\nBound signature (REQUIRED on all `RelayerAuth`\
-        \ requests \u2014 legacy-only requests are rejected):\n- `X-Relayer-Nonce`:\
-        \ 32-hex-char (16-byte) per-request nonce\n- `X-Relayer-Binding`: ECDSA (personal_sign)\
+        Requires five headers: the three legacy headers below plus `X-Relayer-Nonce`\
+        \ and\n`X-Relayer-Binding` (both described in the \"Bound signature\" section\
+        \ below).\n- `X-Relayer-Wallet`: The relayer's wallet address (signer)\n-\
+        \ `X-Relayer-Timestamp`: Unix timestamp (must be within 2 minutes)\n- `X-Relayer-Signature`:\
+        \ ECDSA signature of `keccak256(timestamp|wallet)`\nOperator endpoints (income,\
+        \ restart, sync management, notary reconcile) also\naccept these headers as\
+        \ one authentication path; the operator dashboard\nalternatively authenticates\
+        \ via its web session cookie, which is not\nexpressible as an OpenAPI scheme.\n\
+        \nBound signature (REQUIRED on all `RelayerAuth` requests \u2014 legacy-only\
+        \ requests are rejected):\n- `X-Relayer-Nonce`: 32-hex-char (16-byte) per-request\
+        \ nonce (5-minute replay TTL)\n- `X-Relayer-Binding`: ECDSA (personal_sign)\
         \ signature over\n  `chrono-bind-v1|timestamp|wallet|method|path|rawQuery|sha256(body)|nonce`\n\
-        \  (`wallet` is lowercased; `sha256(body)` is lowercase hex SHA-256 of the\
-        \ raw body bytes)\nVerifiers fail closed on missing, invalid, or replayed\
-        \ bindings.\n"
+        \  (`wallet` is lowercased; `method` is uppercase; `rawQuery` is the raw query\
+        \ string\n  without `?` or empty string when absent; `sha256(body)` is lowercase\
+        \ hex SHA-256 of\n  the raw body bytes, `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`\n\
+        \  for an empty body).\nVerifiers fail closed (`401`) on missing, invalid,\
+        \ or replayed bindings (`REPLAY_ATTEMPT`\non replayed nonces, `REPLAY_CACHE_SATURATED`\
+        \ if the nonce cache is saturated).\n"
     BearerAuth:
       type: http
       scheme: bearer
@@ -3237,10 +3264,10 @@ components:
   headers:
     RetryAfter:
       description: Number of seconds to wait before retrying the request (remaining
-        seconds in the current rate-limit window).
+        whole seconds in the current rate-limit window, minimum 1).
       schema:
         type: integer
-        minimum: 0
+        minimum: 1
   responses:
     BadRequest:
       description: Bad Request
@@ -3359,6 +3386,7 @@ components:
       - EXPIRED_SIGNATURE
       - EXPIRED_ENVELOPE
       - REPLAY_ATTEMPT
+      - REPLAY_CACHE_SATURATED
       - INVALID_AUTH_VALUE
       - SECRET_NOT_FOUND
       - SECRET_LOCKED
@@ -3399,6 +3427,7 @@ components:
       - Signature timestamp is outside the allowed window
       - Access envelope timestamp is older than the allowed freshness window
       - Replay of a previously used access envelope or signature
+      - Replay cache has reached its capacity limit (too many pending nonces)
       - Malformed or undecryptable Encrypted Access Envelope
       - Secret ID does not exist on Sapphire or in the relayer database
       - Secret is still time-locked
@@ -3902,6 +3931,19 @@ components:
                 description: Publication timestamp of the latest release on the update
                   feed (RFC3339, omitted when zero)
                 example: '2026-03-30T05:12:00Z'
+              simplex_enabled:
+                type: boolean
+                description: Whether the SimpleX notification channel is enabled in
+                  the operator settings (omitted when settings are unavailable)
+              simplex_running:
+                type: boolean
+                description: Whether the supervised simplex-chat notification daemon
+                  is currently running. False while the channel is enabled but dark
+                  (omitted when settings are unavailable)
+              simplex_error:
+                type: string
+                description: Last simplex-chat daemon error (omitted when there is
+                  none)
     ContractAddressesResponse:
       allOf:
       - $ref: '#/components/schemas/ApiResponse'
@@ -4026,8 +4068,8 @@ components:
                   name the server emits.
               calls_count:
                 type: integer
-                description: Legacy field name for the total calls targeting this
-                  blockchain; the server emits `calls`.
+                deprecated: true
+                description: Never emitted by the server; use `calls`.
               success_rate:
                 type: number
                 format: float
@@ -5119,8 +5161,9 @@ components:
       properties:
         doc_hash:
           type: string
-          pattern: ^0x[a-fA-F0-9]{64}$
-          description: Bytes32 Keccak256 hash of the anchored document hash
+          pattern: ^0x[a-fA-F0-9]{128}$
+          description: SHA3-512 hash of the anchored document (0x-prefixed, 128 hex
+            characters)
         author:
           type: string
           pattern: ^0x[a-fA-F0-9]{40}$

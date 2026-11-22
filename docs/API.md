@@ -123,25 +123,49 @@ endpoint, and per-client limits when a valid `BearerAuth` token is supplied are
 reserved for future enforcement (`Authorization` headers are currently accepted and
 ignored). Currently enforced server limits:
 
-- **Baseline public API limit** (all other `/api/*` endpoints except `GET /api/health`,
-  which has no rate-limiting middleware): **1,200 requests/hour per client IP**.
+- **Baseline public API limit** (generated public `/api/*` endpoints plus
+  `/api/bootstrap/snapshot-info` and `/api/logs/ws`, excluding `GET /api/health`
+  which is unthrottled, and excluding routes with dedicated limiters below):
+  **1,200 requests/hour per client IP**. Peer-to-peer routes (`/api/records`,
+  `/api/records/sync`, `/api/records/iblt-sync`, `/api/vouchers/sync`,
+  `/api/notary/timestamps/sync`, `/api/dead-letter/notify`,
+  `/api/bootstrap/snapshot`) share the same bucket with a **10x ceiling
+  (12,000 requests/hour)** so a relayer fleet behind one egress IP is never
+  mistaken for abuse. Non-OpenAPI documentation/utility routes
+  (`/api/sign-auth-request`, `/api/docs*`, `/api/explorer*`, `/api/openapi*.yaml`)
+  and `webAuthMiddleware`-protected `/api/database/*` routes do not pass through
+  this baseline limiter.
 - **Shared rate-limited endpoints** (`/api/voucher/redeem`, `/api/voucher/check`,
   `/api/notary/timestamp`, `/api/wallet/{wallet}/pubkey`, `/api/reprocess/gateway`,
-  `/api/vouchers/discover`, `/api/update/binary`, and `/api/abuse/report`): **50
-  requests/hour per client IP**.
+  `/api/gateway/reprocess`, `/api/vouchers/discover`, `/api/update/binary`, and
+  `/api/abuse/report`): **50 requests/hour per client IP**.
 - **Secret access** (`/api/secrets/access`): **50 requests/hour** on the paid/gas
   path and **1,000 requests/hour** on the cached/already-viewed path, keyed per
-  `secretId` and per client IP.
+  `secretId` and per client IP. The per-`secretId` bucket always enforces; the
+  per-IP buckets ship in observe-only mode (see below) and are skipped entirely
+  when the client IP resolves to a local reverse proxy.
 - **Voucher secret writes** (`/api/voucher/secret/create`, `/update`, `/cancel`):
   **100 requests/hour per `userWallet`** and **300 requests/hour per client IP**;
-  **128 KiB** request body cap (`413`).
+  **128 KiB** (`131,072` bytes) request body cap (`413`).
 - **Journal writes** (`/api/journal/entry`): **50 requests/hour per `secret_id`** and
-  **120 requests/hour per client IP**; **128 KiB** request body cap (`413`).
+  **120 requests/hour per client IP**; **128 KiB** (`131,072` bytes) request body cap (`413`).
 - **Global request body cap**: **4 MiB** across API routes.
 
 Exceeding a rate limit returns HTTP `429` (`code: RATE_LIMITED`) with a `Retry-After`
-response header (remaining seconds in the current window). Clients should honor
+response header (integer seconds remaining in the current window, minimum `1`). Clients should honor
 `Retry-After` or back off exponentially when retrying `429` responses.
+
+The public baseline limiter ships in **observe-only mode**: over-threshold requests are
+counted and logged but still served, so the operator can size the ceiling from real
+traffic before enforcing. Set `relayer.baseline_limiter_mode` (env
+`RELAYER_BASELINE_LIMITER_MODE`) to `enforce` to activate `429` responses on that
+bucket; the current mode and would-block counters are exported by `GET /api/metrics`
+(`relayer_limiter_mode`, `relayer_limiter_would_block_total`). Any value other than
+`enforce` behaves as `log`. The admin API baseline limiter follows the same pattern
+via `relayer.admin_general_limiter_mode` (`RELAYER_ADMIN_GENERAL_LIMITER_MODE`), as
+does the secret-access per-IP bucket via `relayer.access_secret_ip_bucket_mode`
+(`RELAYER_ACCESS_SECRET_IP_BUCKET_MODE`); the per-`secretId` access bucket is
+unaffected by the mode and always enforces.
 
 
 **Version:** 1.0.2
@@ -205,7 +229,8 @@ response header (remaining seconds in the current window). Clients should honor
 ### RelayerAuth
 **Type:** `apiKey`
 ECDSA signature authentication for relayer-to-relayer requests.
-Requires three headers:
+Requires five headers: the three legacy headers below plus `X-Relayer-Nonce` and
+`X-Relayer-Binding` (both described in the "Bound signature" section below).
 - `X-Relayer-Wallet`: The relayer's wallet address (signer)
 - `X-Relayer-Timestamp`: Unix timestamp (must be within 2 minutes)
 - `X-Relayer-Signature`: ECDSA signature of `keccak256(timestamp|wallet)`
@@ -215,11 +240,15 @@ alternatively authenticates via its web session cookie, which is not
 expressible as an OpenAPI scheme.
 
 Bound signature (REQUIRED on all `RelayerAuth` requests — legacy-only requests are rejected):
-- `X-Relayer-Nonce`: 32-hex-char (16-byte) per-request nonce
+- `X-Relayer-Nonce`: 32-hex-char (16-byte) per-request nonce (5-minute replay TTL)
 - `X-Relayer-Binding`: ECDSA (personal_sign) signature over
   `chrono-bind-v1|timestamp|wallet|method|path|rawQuery|sha256(body)|nonce`
-  (`wallet` is lowercased; `sha256(body)` is lowercase hex SHA-256 of the raw body bytes)
-Verifiers fail closed on missing, invalid, or replayed bindings.
+  (`wallet` is lowercased; `method` is uppercase; `rawQuery` is the raw query string
+  without `?` or empty string when absent; `sha256(body)` is lowercase hex SHA-256 of
+  the raw body bytes, `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+  for an empty body).
+Verifiers fail closed (`401`) on missing, invalid, or replayed bindings (`REPLAY_ATTEMPT`
+on replayed nonces, `REPLAY_CACHE_SATURATED` if the nonce cache is saturated).
 
 **Location:** `header`
 
