@@ -3414,6 +3414,7 @@ components:
       - MESSAGE_NOT_FOUND
       - PUBKEY_NOT_REGISTERED
       - NOTARY_RECORD_NOT_FOUND
+      - SIMPLEX_RESET_REENABLE_FAILED
       x-enum-descriptions:
       - Malformed request body, missing required fields, or basic schema violation
       - One or more fields failed semantic validation
@@ -3455,6 +3456,7 @@ components:
       - Message record not found
       - Wallet has not registered a public key
       - Notary timestamp record not found
+      - SimpleX reset deleted pairing data but re-enabling the channel failed
     ErrorResponse:
       allOf:
       - $ref: '#/components/schemas/ApiResponse'
