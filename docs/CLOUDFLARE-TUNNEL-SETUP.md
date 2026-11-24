@@ -61,7 +61,7 @@ If you generate a new wallet, **import the displayed Private Key into Rabby/Meta
 After wallet setup, the wizard presents the HTTPS Ingress options:
 
 ```
-Step 4/6 — HTTPS Ingress & Reverse Proxy Mode
+Step 4/5 — HTTPS Ingress & Reverse Proxy Mode
   [1] Cloudflare Tunnel (cloudflared) — Recommended (Zero open inbound ports)
   [2] Nginx + Let's Encrypt (certbot) — Automatic TLS on ports 80 & 443
   [3] Nginx + Custom TLS Certificate — Paste your own PEM fullchain & private key
@@ -92,8 +92,10 @@ The wizard offers two authentication methods:
 
 ```
 Cloudflare Tunnel Authentication:
-  [1] Zero Trust Dashboard Token (Recommended — paste token or 'cloudflared service install <TOKEN>')
-  [2] Locally-managed Tunnel Credentials JSON
+  [1] Zero Trust Dashboard Token (Recommended — shown in the dashboard's
+      'cloudflared service install <TOKEN>' command)
+  [2] CLI-created Tunnel Credentials JSON (locally-managed — minted by the
+      cloudflared CLI; the dashboard no longer offers a credentials download)
 ```
 
 ![Screenshot: Cloudflare Auth Method](screenshots/08-cloudflare-auth-method.png)
@@ -105,7 +107,7 @@ This is the simplest method. Follow these steps:
 #### 5.1 Create a Tunnel in Cloudflare Zero Trust
 
 1. Log in to your Cloudflare Zero Trust dashboard: https://one.dash.cloudflare.com
-2. Navigate to **Networks** → **Tunnels**
+2. Navigate to **Networking** → **Tunnels**
 3. Click **Create a tunnel**
 
 ![Screenshot: Cloudflare Tunnels Dashboard](screenshots/09-cloudflare-tunnels-dashboard.png)
@@ -129,10 +131,10 @@ Select **Generic / Linux** as the installation method:
 Cloudflare will display a command like:
 
 ```bash
-cloudflared tunnel --config /path/to/config.yml run <TOKEN>
+cloudflared service install <TOKEN>
 ```
 
-**Copy the `<TOKEN>` part only** (it looks like a long Base64 string).
+**Copy the `<TOKEN>` part only** (it looks like a long Base64 string, typically starting with `eyJ`).
 
 ![Screenshot: Copy Tunnel Token](screenshots/12-copy-tunnel.png)
 
@@ -141,8 +143,9 @@ cloudflared tunnel --config /path/to/config.yml run <TOKEN>
 Return to the Relayer OS console and paste the token:
 
 ```
-In Cloudflare Zero Trust -> Networks -> Tunnels:
-Route Public Hostname relayer.yourdomain.com -> HTTP://127.0.0.1:8081
+Zero Trust dashboard -> Networking -> Tunnels -> your tunnel:
+Routes tab -> Add route -> Published application ->
+relayer.yourdomain.com -> http://127.0.0.1:8081
 Paste Cloudflare Tunnel Token (input hidden): [paste token here]
 ```
 
@@ -154,11 +157,11 @@ The token input is hidden for security.
 
 **Before pressing Enter in the Relayer OS console**, complete this step in Cloudflare:
 
-1. In the Cloudflare tunnel configuration, click **Add a public hostname**
-2. **Hostname:** Enter your domain (e.g., `relayer.yourdomain.com`)
-3. **Service:** Select **HTTP**
-4. **URL:** Enter `127.0.0.1:8081`
-5. Click **Save hostname**
+1. Open your tunnel and go to the **Routes** tab
+2. Click **Add route** and select **Published application**
+3. **Hostname:** Enter your domain (e.g., `relayer.yourdomain.com`)
+4. **Service URL:** Enter `http://127.0.0.1:8081`
+5. Click **Add route**
 
 ![Screenshot: Configure Public Hostname](screenshots/14-configure-hostname.png)
 
@@ -174,24 +177,32 @@ Press Enter after pasting the token. The wizard will confirm:
 
 ![Screenshot: Cloudflare Setup Complete](screenshots/15-cloudflare-complete.png)
 
-### Method 2: Locally-managed Tunnel Credentials JSON
+### Method 2: CLI-created Tunnel Credentials JSON
 
-For advanced users who prefer manual tunnel management:
+For advanced users who prefer locally-managed tunnels (ingress rules in your own `config.yml` instead of dashboard-managed routes). **The Zero Trust dashboard no longer offers a `credentials.json` download** — tunnels created in the dashboard are remotely-managed and hand out a token only. The credentials file is minted by the cloudflared CLI:
 
-#### 5.1 Create Tunnel and Download Credentials
+#### 5.1 Mint the Credentials File (on any machine with a browser)
 
-1. In Cloudflare Zero Trust → Networks → Tunnels, create a tunnel
-2. After creation, click the tunnel and download the **credentials.json** file
-3. Note the **Tunnel UUID** from the tunnel details
+```bash
+cloudflared tunnel login                     # opens a browser; writes cert.pem
+cloudflared tunnel create chronolox-relayer  # -> ~/.cloudflared/<TUNNEL-UUID>.json
+```
 
-![Screenshot: Download Credentials](screenshots/16-download-credentials.png)
+Lost the credentials file for an existing tunnel? Recover it with the tunnel token command (works for remotely-managed tunnels too):
 
-#### 5.2 Enter Tunnel UUID and Credentials in Relayer OS
+```bash
+cloudflared tunnel token <tunnel-name-or-uuid> --cred-file out.json
+```
+
+![Screenshot: Create Tunnel via CLI](screenshots/16-create-tunnel-cli.png)
+
+#### 5.2 Paste Credentials in Relayer OS Console
+
+The wizard prints the exact commands above, then asks for the JSON. Paste the file content and finish with an empty line — the Tunnel UUID is extracted from the JSON automatically (you are only prompted for it if extraction fails):
 
 ```
-Enter Tunnel UUID: [paste UUID]
 Paste your Tunnel credentials JSON (finish with an empty line):
-[paste credentials.json content]
+{"AccountTag":"...","TunnelSecret":"...","TunnelID":"..."}
 [paste empty line to finish]
 ```
 
@@ -201,40 +212,24 @@ Paste your Tunnel credentials JSON (finish with an empty line):
 
 After Cloudflare Tunnel configuration, continue with the remaining wizard steps:
 
-### 6.1 Optional: Telegram Alerts
+### 6.1 Optional: Telegram Alerts & Custom RPC Keys
 
-Configure Telegram bot token and chat ID for critical alerts (optional):
+Configure Telegram bot token and chat ID for critical alerts, plus optional Alchemy API keys for enhanced RPC fallback:
 
 ```
-Step 5/6 — Optional Telegram Alerts
+Step 5/5 — Optional Telegram Alerts & Custom RPC Keys
 Enter Telegram Bot Token (or press Enter to skip):
 Enter Telegram Chat ID (or press Enter to skip):
+Enter Alchemy API Key (comma-separated, or press Enter to skip):
 ```
 
 ![Screenshot: Telegram Alerts](screenshots/18-telegram-alerts.png)
 
-### 6.2 Optional: Alchemy API Keys
+### 6.2 No SSH on the Appliance
 
-Configure Alchemy API keys for enhanced RPC fallback (optional):
+The wizard finishes with a notice instead of an SSH policy step: `openssh-server` and `sudo` are **not in the image** — the appliance has no network login path at all. Management happens exclusively through the provider's VGA/serial console and the dashboard's Emergency Root Shell (gated by a fresh passphrase + typed confirmation).
 
-```
-Enter Alchemy API Key (comma-separated, or press Enter to skip):
-```
-
-![Screenshot: Alchemy Keys](screenshots/19-alchemy-keys.png)
-
-### 6.3 SSH Access Policy
-
-Configure SSH access for emergency maintenance:
-
-```
-Step 6/6 — SSH Access Policy
-Allow SSH access? [y/N]:
-```
-
-![Screenshot: SSH Policy](screenshots/20-ssh-policy.png)
-
-If you enable SSH, you'll need to upload your public SSH key to `/etc/chronolox-ssh/authorized_keys` after setup.
+![Screenshot: Remote Access Notice](screenshots/20-remote-access-notice.png)
 
 ## Step 7: Configuration Complete
 
@@ -253,7 +248,7 @@ The wizard will display a success message:
 
 ### 8.1 Check Tunnel Health in Cloudflare Dashboard
 
-Navigate to Cloudflare Zero Trust → Networks → Tunnels and verify your tunnel shows as **Healthy**:
+Navigate to Cloudflare Zero Trust → **Networking** → **Tunnels** and verify your tunnel shows as **Healthy**:
 
 ![Screenshot: Tunnel Healthy](screenshots/22-tunnel-healthy.png)
 
@@ -274,7 +269,7 @@ You should see the Chronolox Relayer dashboard:
 On the Relayer OS console, check UFW status:
 
 ```
-sudo ufw status
+ufw status
 ```
 
 Expected output for Cloudflare mode:
@@ -329,7 +324,7 @@ No inbound ports should be listed — all traffic enters via the outbound Cloudf
 
 3. Check UFW status (should have no inbound rules):
    ```bash
-   sudo ufw status
+   ufw status
    ```
 
 ### Token Format Error
@@ -365,8 +360,10 @@ To switch from Cloudflare Tunnel to another ingress mode (Let's Encrypt, Custom 
 
 ## Additional Resources
 
-- [Cloudflare Zero Trust Documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-- [Cloudflare Tunnel Documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/)
+- [Cloudflare Zero Trust Documentation](https://developers.cloudflare.com/cloudflare-one/)
+- [Cloudflare Tunnel Documentation](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/)
+- [Create a tunnel (dashboard)](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/)
+- [Create a locally-managed tunnel (CLI)](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)
 - [Chronolox Relayer OS Plan](../CHRONOLOX-RELAYER-OS-PLAN.md)
 - [Relayer Onboarding Guide](https://chronolox.com/relayer-os)
 
